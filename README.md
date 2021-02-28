@@ -1,0 +1,2 @@
+# typical
+A toy typesystem
