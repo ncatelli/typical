@@ -3,10 +3,6 @@
 //! plan is to use this to support the other first principals projects, I would
 //! heavily advice against anyone attempting to use any part of this.
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+mod graph;
+mod typechecker;
+mod types;
