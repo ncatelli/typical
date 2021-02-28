@@ -3,14 +3,18 @@ use std::fmt::Debug;
 type NodeId = crate::types::EntityId<usize>;
 
 pub trait Edge: Copy {
-    fn new(src: NodeId, dest: NodeId) -> Self;
+    fn new(a: NodeId, b: NodeId) -> Self;
+    /// Return the source node where (A, B) -> A
     fn source(&self) -> NodeId;
+    /// Return the destination node where (A, B) -> B
     fn destination(&self) -> NodeId;
+    /// Return the inverse edge where (A, B) -> (B, A)
+    fn inverse(&self) -> Self;
 }
 
 impl Edge for (NodeId, NodeId) {
-    fn new(src: NodeId, dest: NodeId) -> Self {
-        (src, dest)
+    fn new(a: NodeId, b: NodeId) -> Self {
+        (a, b)
     }
 
     fn source(&self) -> NodeId {
@@ -20,11 +24,10 @@ impl Edge for (NodeId, NodeId) {
     fn destination(&self) -> NodeId {
         self.1
     }
-}
 
-enum Node<N> {
-    SubType,
-    Representative(N),
+    fn inverse(&self) -> Self {
+        (self.1, self.0)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -57,45 +60,26 @@ where
         NodeId::new(self.nodes.len() - 1)
     }
 
-    pub fn add_node(mut self, new_node: N) -> (NodeId, Self) {
-        let new_key = self.mut_add_node(new_node);
-        (new_key, self)
+    pub fn mut_add_directed_edge(&mut self, a: NodeId, b: NodeId) -> E {
+        let a_to_b = E::new(a, b);
+        self.edges[usize::from(b)].push(a_to_b);
+        self.edges[usize::from(a)].push(a_to_b);
+
+        a_to_b
     }
 
-    pub fn mut_add_parent_binding(&mut self, child: NodeId, parent: NodeId) -> E {
-        let parent_to_child = E::new(parent, child);
-        self.edges[usize::from(child)].push(parent_to_child);
-        self.edges[usize::from(parent)].push(parent_to_child);
+    pub fn mut_add_undirected_edge(&mut self, a: NodeId, b: NodeId) -> E {
+        let edge = E::new(a, b);
+        let inverse_edge = edge.inverse();
+        self.edges[usize::from(a)].push(edge);
+        self.edges[usize::from(a)].push(inverse_edge);
+        self.edges[usize::from(b)].push(edge);
+        self.edges[usize::from(b)].push(inverse_edge);
 
-        parent_to_child
+        edge
     }
 
-    pub fn add_parent_binding(mut self, child: NodeId, parent: NodeId) -> (E, Self) {
-        let new_edge = self.mut_add_parent_binding(child, parent);
-        (new_edge, self)
-    }
-
-    pub fn parents(&self, eid: NodeId) -> Option<Vec<NodeId>> {
-        let edges: Vec<NodeId> = self.edges[usize::from(eid)]
-            .iter()
-            .map(|&e| {
-                if e.destination() == eid {
-                    Some(e.source())
-                } else {
-                    None
-                }
-            })
-            .filter_map(|x| x)
-            .collect();
-
-        if edges.is_empty() {
-            None
-        } else {
-            Some(edges)
-        }
-    }
-
-    pub fn children(&self, eid: NodeId) -> Option<Vec<NodeId>> {
+    pub fn upper_bounds(&self, eid: NodeId) -> Option<Vec<NodeId>> {
         let idx = usize::from(eid);
         let edges: Vec<NodeId> = self.edges[idx]
             .iter()
@@ -117,6 +101,23 @@ where
     }
 }
 
+// Immutable modifications
+impl<N, E> Graph<N, E>
+where
+    N: crate::types::AbstractEntity,
+    E: Edge,
+{
+    pub fn add_node(mut self, new_node: N) -> (NodeId, Self) {
+        let new_key = self.mut_add_node(new_node);
+        (new_key, self)
+    }
+
+    pub fn add_directed_edge(mut self, a: NodeId, b: NodeId) -> (E, Self) {
+        let new_edge = self.mut_add_directed_edge(a, b);
+        (new_edge, self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::graph::*;
@@ -127,9 +128,8 @@ mod tests {
         Any,
         Numeric,
         Integer,
-        Unsigned,
-        Unsigned8,
-        Signed,
+        Unsigned(usize),
+        Signed(usize),
         String,
     }
 
@@ -140,13 +140,8 @@ mod tests {
 
         fn arity(&self) -> Option<usize> {
             match self {
-                Self::Any => None,
-                Self::Numeric => Some(3),
-                Self::Integer => Some(2),
-                Self::Unsigned => Some(1),
-                Self::Unsigned8 => Some(0),
-                Self::Signed => Some(1),
-                Self::String => Some(0),
+                Self::Any | Self::Numeric | Self::Integer => None,
+                _ => Some(0),
             }
         }
 
@@ -157,12 +152,15 @@ mod tests {
                 (Self::String, _) | (_, Self::String) => Err(TypeError::Converge),
                 (Self::Numeric, o) | (o, Self::Numeric) => Ok(*o), // o can only be Numeric, Integer, Unsigned, Signed, or U8.
                 (Self::Integer, o) | (o, Self::Integer) => Ok(*o), // o can only be  Integer, Unsigned, Signed, or U8.
-                (Self::Unsigned, Self::Signed) | (Self::Signed, Self::Unsigned) => {
+                (Self::Unsigned(_), Self::Signed(_)) | (Self::Signed(_), Self::Unsigned(_)) => {
                     Err(TypeError::Converge)
                 }
-                (Self::Signed, Self::Signed) => Ok(Self::Signed),
-                (Self::Unsigned, o) | (o, Self::Unsigned) => Ok(*o), // o can only be Unsigned or Unsigned8.
-                (Self::Unsigned8, Self::Unsigned8) => Ok(Self::Unsigned8),
+                (Self::Signed(bitsl), Self::Signed(bitsr)) => {
+                    Ok(Self::Signed(std::cmp::max(*bitsl, *bitsr)))
+                }
+                (Self::Unsigned(bitsl), Self::Unsigned(bitsr)) => {
+                    Ok(Self::Unsigned(std::cmp::max(*bitsl, *bitsr)))
+                }
                 _ => Err(TypeError::Converge),
             }
         }
@@ -174,9 +172,9 @@ mod tests {
             AbstractTypes::Any,
             AbstractTypes::Numeric,
             AbstractTypes::Integer,
-            AbstractTypes::Unsigned,
-            AbstractTypes::Signed,
-            AbstractTypes::Unsigned8,
+            AbstractTypes::Signed(8),
+            AbstractTypes::Unsigned(8), // unsigned int a
+            AbstractTypes::Unsigned(8), // unsigned int b
             AbstractTypes::String,
         ];
 
@@ -184,17 +182,17 @@ mod tests {
             graph.mut_add_node(node);
         }
 
-        let edges: Vec<(EntityId<usize>, EntityId<usize>)> = vec![
-            (EntityId::new(1), EntityId::new(0)),
-            (EntityId::new(6), EntityId::new(0)),
-            (EntityId::new(2), EntityId::new(1)),
-            (EntityId::new(3), EntityId::new(2)),
-            (EntityId::new(4), EntityId::new(2)),
-            (EntityId::new(5), EntityId::new(3)),
+        let directed_edges: Vec<(EntityId<usize>, EntityId<usize>)> = vec![
+            (EntityId::new(0), EntityId::new(1)),
+            (EntityId::new(0), EntityId::new(6)),
+            (EntityId::new(1), EntityId::new(2)),
+            (EntityId::new(2), EntityId::new(3)),
+            (EntityId::new(2), EntityId::new(4)),
+            (EntityId::new(2), EntityId::new(5)),
         ];
 
-        for edge in edges.into_iter() {
-            graph.mut_add_parent_binding(edge.0, edge.1);
+        for edge in directed_edges.into_iter() {
+            graph.mut_add_directed_edge(edge.0, edge.1);
         }
 
         graph
@@ -209,26 +207,27 @@ mod tests {
 
     #[test]
     fn node_with_no_edges_should_return_none() {
-        let graph = generate_test_graph();
+        let mut graph: Graph<AbstractTypes, (EntityId<usize>, EntityId<usize>)> = Graph::new();
+        let entity_key = graph.mut_add_node(AbstractTypes::Any);
 
-        assert_eq!(None, graph.children(EntityId::new(1)))
+        assert_eq!(None, graph.upper_bounds(entity_key))
     }
 
     #[test]
-    fn node_without_parent_edge_should_return_none() {
+    fn node_without_directed_edge_to_an_upper_bound_should_return_none() {
         let mut graph: Graph<AbstractTypes, (EntityId<usize>, EntityId<usize>)> = Graph::new();
         graph.mut_add_node(AbstractTypes::Any);
 
-        assert_eq!(None, graph.children(EntityId::new(0)))
+        assert_eq!(None, graph.upper_bounds(EntityId::new(0)))
     }
 
     #[test]
-    fn node_with_parent_edge_should_return_none() {
+    fn node_with_directed_edge_to_an_upper_bound_should_return_the_child() {
         let graph = generate_test_graph();
 
         assert_eq!(
             Some(vec![EntityId::new(2)]),
-            graph.children(EntityId::new(1))
+            graph.upper_bounds(EntityId::new(1))
         )
     }
 }
