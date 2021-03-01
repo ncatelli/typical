@@ -71,7 +71,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test() {
+    fn edges_should_persist_transitivity() {
         let mut r = Reachability::default();
         for _ in 0..10 {
             r.add_node();
