@@ -1,233 +1,99 @@
-use std::fmt::Debug;
-
-type NodeId = crate::types::EntityId<usize>;
-
-pub trait Edge: Copy {
-    fn new(a: NodeId, b: NodeId) -> Self;
-    /// Return the source node where (A, B) -> A
-    fn source(&self) -> NodeId;
-    /// Return the destination node where (A, B) -> B
-    fn destination(&self) -> NodeId;
-    /// Return the inverse edge where (A, B) -> (B, A)
-    fn inverse(&self) -> Self;
+#[derive(Debug, Default, Clone)]
+struct OrderedSet<T> {
+    v: Vec<T>,
+    s: std::collections::HashSet<T>,
 }
 
-impl Edge for (NodeId, NodeId) {
-    fn new(a: NodeId, b: NodeId) -> Self {
-        (a, b)
-    }
-
-    fn source(&self) -> NodeId {
-        self.0
-    }
-
-    fn destination(&self) -> NodeId {
-        self.1
-    }
-
-    fn inverse(&self) -> Self {
-        (self.1, self.0)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Graph<N, E>
-where
-    N: crate::types::AbstractEntity,
-    E: Edge,
-{
-    /// Stores all nodes indexed by
-    nodes: Vec<N>,
-    edges: Vec<Vec<E>>,
-}
-
-impl<N, E> Graph<N, E>
-where
-    N: crate::types::AbstractEntity,
-    E: Edge,
-{
-    pub fn new() -> Self {
-        Graph {
-            nodes: Vec::new(),
-            edges: Vec::new(),
-        }
-    }
-
-    pub fn mut_add_node(&mut self, new_node: N) -> NodeId {
-        self.nodes.push(new_node);
-        self.edges.push(vec![]);
-
-        NodeId::new(self.nodes.len() - 1)
-    }
-
-    pub fn mut_add_directed_edge(&mut self, a: NodeId, b: NodeId) -> E {
-        let a_to_b = E::new(a, b);
-        self.edges[usize::from(b)].push(a_to_b);
-        self.edges[usize::from(a)].push(a_to_b);
-
-        a_to_b
-    }
-
-    pub fn mut_add_undirected_edge(&mut self, a: NodeId, b: NodeId) -> E {
-        let edge = E::new(a, b);
-        let inverse_edge = edge.inverse();
-        self.edges[usize::from(a)].push(edge);
-        self.edges[usize::from(a)].push(inverse_edge);
-        self.edges[usize::from(b)].push(edge);
-        self.edges[usize::from(b)].push(inverse_edge);
-
-        edge
-    }
-
-    pub fn upper_bounds(&self, eid: NodeId) -> Option<Vec<NodeId>> {
-        let idx = usize::from(eid);
-        let edges: Vec<NodeId> = self.edges[idx]
-            .iter()
-            .map(|&e| {
-                if e.source() == eid {
-                    Some(e.destination())
-                } else {
-                    None
-                }
-            })
-            .filter_map(|x| x)
-            .collect();
-
-        if edges.is_empty() {
-            None
+impl<T: Eq + std::hash::Hash + Clone> OrderedSet<T> {
+    fn insert(&mut self, value: T) -> bool {
+        if self.s.insert(value.clone()) {
+            self.v.push(value);
+            true
         } else {
-            Some(edges)
+            false
         }
+    }
+
+    fn iter(&self) -> std::slice::Iter<T> {
+        self.v.iter()
     }
 }
 
-// Immutable modifications
-impl<N, E> Graph<N, E>
+type ID = usize;
+#[derive(Debug, Default, Clone)]
+pub struct Reachability<ID>
 where
-    N: crate::types::AbstractEntity,
-    E: Edge,
+    ID: Into<usize> + From<usize>,
 {
-    pub fn add_node(mut self, new_node: N) -> (NodeId, Self) {
-        let new_key = self.mut_add_node(new_node);
-        (new_key, self)
+    upsets: Vec<OrderedSet<ID>>,
+    downsets: Vec<OrderedSet<ID>>,
+}
+
+impl Reachability<ID>
+where
+    ID: Into<usize> + From<usize>,
+{
+    pub fn add_node(&mut self) -> ID {
+        let i = ID::from(self.upsets.len());
+
+        self.upsets.push(OrderedSet::default());
+        self.downsets.push(OrderedSet::default());
+        i
     }
 
-    pub fn add_directed_edge(mut self, a: NodeId, b: NodeId) -> (E, Self) {
-        let new_edge = self.mut_add_directed_edge(a, b);
-        (new_edge, self)
+    pub fn add_edge(&mut self, lhs: ID, rhs: ID, mut out: Vec<(ID, ID)>) -> Vec<(ID, ID)> {
+        let mut work = vec![(lhs, rhs)];
+
+        while let Some((lhs, rhs)) = work.pop() {
+            let (lhs, rhs) = (usize::from(lhs), usize::from(rhs));
+            // Insert returns false if the edge is already present
+            if !self.downsets[lhs].insert(rhs) {
+                continue;
+            }
+            self.upsets[rhs].insert(lhs);
+            // Inform the caller that a new edge was added
+            out.push((lhs, rhs));
+
+            for &lhs2 in self.upsets[lhs].iter() {
+                work.push((lhs2, rhs));
+            }
+            for &rhs2 in self.downsets[rhs].iter() {
+                work.push((lhs, rhs2));
+            }
+        }
+
+        out
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::graph::*;
-    use crate::types::*;
+    use super::*;
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum AbstractTypes {
-        Any,
-        Numeric,
-        Integer,
-        Unsigned(usize),
-        Signed(usize),
-        String,
-    }
-
-    impl AbstractEntity for AbstractTypes {
-        fn unconstrained_type() -> Self {
-            Self::Any
+    #[test]
+    fn test() {
+        let mut r = Reachability::default();
+        for _ in 0..10 {
+            r.add_node();
         }
 
-        fn arity(&self) -> Option<usize> {
-            match self {
-                Self::Any | Self::Numeric | Self::Integer => None,
-                _ => Some(0),
+        r.add_edge(0, 3, vec![]);
+        r.add_edge(1, 3, vec![]);
+        r.add_edge(2, 3, vec![]);
+
+        let mut out = r.add_edge(3, 4, vec![]);
+
+        let mut expected = Vec::new();
+        for &lhs in &[0, 1, 2, 3] {
+            for &rhs in &[4] {
+                expected.push((lhs, rhs));
             }
         }
 
-        fn converge(&self, other: &Self) -> Result<Self, TypeError> {
-            match (self, other) {
-                (Self::Any, o) | (o, Self::Any) => Ok(*o),
-                (Self::String, Self::String) => Ok(Self::String),
-                (Self::String, _) | (_, Self::String) => Err(TypeError::Converge),
-                (Self::Numeric, o) | (o, Self::Numeric) => Ok(*o), // o can only be Numeric, Integer, Unsigned, Signed, or U8.
-                (Self::Integer, o) | (o, Self::Integer) => Ok(*o), // o can only be  Integer, Unsigned, Signed, or U8.
-                (Self::Unsigned(_), Self::Signed(_)) | (Self::Signed(_), Self::Unsigned(_)) => {
-                    Err(TypeError::Converge)
-                }
-                (Self::Signed(bitsl), Self::Signed(bitsr)) => {
-                    Ok(Self::Signed(std::cmp::max(*bitsl, *bitsr)))
-                }
-                (Self::Unsigned(bitsl), Self::Unsigned(bitsr)) => {
-                    Ok(Self::Unsigned(std::cmp::max(*bitsl, *bitsr)))
-                }
-                _ => Err(TypeError::Converge),
-            }
-        }
-    }
+        out.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(out, expected);
 
-    fn generate_test_graph() -> Graph<AbstractTypes, (EntityId<usize>, EntityId<usize>)> {
-        let mut graph: Graph<AbstractTypes, (EntityId<usize>, EntityId<usize>)> = Graph::new();
-        let nodes = vec![
-            AbstractTypes::Any,
-            AbstractTypes::Numeric,
-            AbstractTypes::Integer,
-            AbstractTypes::Signed(8),
-            AbstractTypes::Unsigned(8), // unsigned int a
-            AbstractTypes::Unsigned(8), // unsigned int b
-            AbstractTypes::String,
-        ];
-
-        for node in nodes.into_iter() {
-            graph.mut_add_node(node);
-        }
-
-        let directed_edges: Vec<(EntityId<usize>, EntityId<usize>)> = vec![
-            (EntityId::new(0), EntityId::new(1)),
-            (EntityId::new(0), EntityId::new(6)),
-            (EntityId::new(1), EntityId::new(2)),
-            (EntityId::new(2), EntityId::new(3)),
-            (EntityId::new(2), EntityId::new(4)),
-            (EntityId::new(2), EntityId::new(5)),
-        ];
-
-        for edge in directed_edges.into_iter() {
-            graph.mut_add_directed_edge(edge.0, edge.1);
-        }
-
-        graph
-    }
-
-    #[test]
-    fn graph_should_add_nodes() {
-        let mut graph: Graph<AbstractTypes, (EntityId<usize>, EntityId<usize>)> = Graph::new();
-
-        assert_eq!(EntityId::new(0), graph.mut_add_node(AbstractTypes::Any))
-    }
-
-    #[test]
-    fn node_with_no_edges_should_return_none() {
-        let mut graph: Graph<AbstractTypes, (EntityId<usize>, EntityId<usize>)> = Graph::new();
-        let entity_key = graph.mut_add_node(AbstractTypes::Any);
-
-        assert_eq!(None, graph.upper_bounds(entity_key))
-    }
-
-    #[test]
-    fn node_without_directed_edge_to_an_upper_bound_should_return_none() {
-        let mut graph: Graph<AbstractTypes, (EntityId<usize>, EntityId<usize>)> = Graph::new();
-        graph.mut_add_node(AbstractTypes::Any);
-
-        assert_eq!(None, graph.upper_bounds(EntityId::new(0)))
-    }
-
-    #[test]
-    fn node_with_directed_edge_to_an_upper_bound_should_return_the_child() {
-        let graph = generate_test_graph();
-
-        assert_eq!(
-            Some(vec![EntityId::new(2)]),
-            graph.upper_bounds(EntityId::new(1))
-        )
+        println!("{:?}", &out);
     }
 }
