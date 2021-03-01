@@ -1,3 +1,6 @@
+//! This crate functions as a test/toy implementation of an algebraic
+//! type-checker based on the work by Robert Grosse.
+
 mod graph;
 
 pub type EntityId = usize;
