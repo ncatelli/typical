@@ -50,13 +50,17 @@ where
     }
 }
 
-/// Graph
+/// Graph represents a series of value IDs as upstream and downstream sets
+/// where upstream sets map all the nodes that have edges to a given node
+/// and downsets that map all edges from a given node.
 #[derive(Debug, Default, Clone)]
 pub struct Graph<Idx>
 where
     Idx: Into<usize> + From<usize> + Debug + Copy,
 {
+    /// maps all nodes that have an edge _to_ a given node.
     upstream_sets: Vec<OrderedSet<Idx>>,
+    /// maps all nodes that have an edge _from_ a given node.
     downstream_sets: Vec<OrderedSet<Idx>>,
 }
 
@@ -64,6 +68,7 @@ impl<Idx> Graph<Idx>
 where
     Idx: Clone + Copy + Eq + std::hash::Hash + Default + Into<usize> + From<usize> + Debug,
 {
+    /// Adds a new node in place by reference, returning the Id of the node.
     pub fn add_node_mut(&mut self) -> Idx {
         self.upstream_sets.push(OrderedSet::default());
         self.downstream_sets.push(OrderedSet::default());
@@ -71,19 +76,17 @@ where
         Idx::from(self.upstream_sets.len() - 1)
     }
 
+    /// Adds a new node by value, returning the modified instance of itself.
     #[allow(dead_code)]
-    pub fn add_node(mut self) -> (Idx, Self) {
+    pub fn add_node(mut self) -> (Self, Idx) {
         let new_id = self.add_node_mut();
-        (new_id, self)
+        (self, new_id)
     }
 
-    pub fn add_edge_mut(
-        &mut self,
-        lhs: Idx,
-        rhs: Idx,
-        mut new_edges: Vec<(Idx, Idx)>,
-    ) -> Vec<(Idx, Idx)> {
+    /// Adds a new edge, updating existing edges to maintain transitivity.
+    pub fn add_edge_mut(&mut self, lhs: Idx, rhs: Idx) -> Vec<(Idx, Idx)> {
         let mut work = vec![(lhs, rhs)];
+        let mut new_edges = Vec::new();
 
         while let Some((lhs, rhs)) = work.pop() {
             // Attempt to insert the rhs into the downstream_set
@@ -104,9 +107,10 @@ where
         new_edges
     }
 
+    /// Adds a new edge by value returning the modified instance of the graph and all new edges.
     #[allow(dead_code)]
     pub fn add_edge(mut self, lhs: Idx, rhs: Idx) -> (Self, Vec<(Idx, Idx)>) {
-        let new_edges = self.add_edge_mut(lhs, rhs, Vec::new());
+        let new_edges = self.add_edge_mut(lhs, rhs);
 
         (self, new_edges)
     }
@@ -118,17 +122,13 @@ mod tests {
 
     #[test]
     fn edges_should_resolve_transitivity() {
-        let graph = (0..10).fold(Graph::default(), |mut acc, _| {
-            acc.add_node_mut();
-            acc
-        });
+        let graph = (0..10).fold(Graph::default(), |acc, _| acc.add_node().0);
 
-        let mut new_edges: Vec<(_, _)> = [(0, 3), (1, 3), (2, 3), (3, 4)]
+        let (_, mut new_edges) = [(0, 3), (1, 3), (2, 3), (3, 4)]
             .iter()
             .fold((graph, vec![]), |(g, _), (upstream, downstream)| {
                 g.add_edge(*upstream, *downstream)
-            })
-            .1;
+            });
 
         let mut expected: Vec<(_, _)> = [0, 1, 2, 3].iter().map(|&lhs| (lhs, 4)).collect();
 

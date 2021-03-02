@@ -83,7 +83,7 @@ where
         let mut pending_edges = vec![(lhs, rhs)];
         let mut type_pairs_to_check = Vec::new();
         while let Some((lhs, rhs)) = pending_edges.pop() {
-            type_pairs_to_check = self.r.add_edge_mut(lhs.0, rhs.0, type_pairs_to_check);
+            type_pairs_to_check.extend(self.r.add_edge_mut(lhs.0, rhs.0));
 
             // Check if adding that edge resulted in any new type pairs needing to be checked
             while let Some((lhs, rhs)) = type_pairs_to_check.pop() {
