@@ -25,8 +25,8 @@ pub struct Graph<ID>
 where
     ID: Into<usize> + From<usize>,
 {
-    upsets: Vec<OrderedSet<ID>>,
-    downsets: Vec<OrderedSet<ID>>,
+    upstream_sets: Vec<OrderedSet<ID>>,
+    downstream_sets: Vec<OrderedSet<ID>>,
 }
 
 impl Graph<ID>
@@ -34,11 +34,19 @@ where
     ID: Into<usize> + From<usize>,
 {
     pub fn add_node_mut(&mut self) -> ID {
-        let i = ID::from(self.upsets.len());
+        let i = ID::from(self.upstream_sets.len());
 
-        self.upsets.push(OrderedSet::default());
-        self.downsets.push(OrderedSet::default());
+        self.upstream_sets.push(OrderedSet::default());
+        self.downstream_sets.push(OrderedSet::default());
         i
+    }
+
+    pub fn add_node(mut self) -> (ID, Self) {
+        let i = ID::from(self.upstream_sets.len());
+
+        self.upstream_sets.push(OrderedSet::default());
+        self.downstream_sets.push(OrderedSet::default());
+        (i, self)
     }
 
     pub fn add_edge_mut(&mut self, lhs: ID, rhs: ID, mut out: Vec<(ID, ID)>) -> Vec<(ID, ID)> {
@@ -46,23 +54,48 @@ where
 
         while let Some((lhs, rhs)) = work.pop() {
             let (lhs, rhs) = (usize::from(lhs), usize::from(rhs));
-            // Insert returns false if the edge is already present
-            if !self.downsets[lhs].insert(rhs) {
-                continue;
-            }
-            self.upsets[rhs].insert(lhs);
-            // Inform the caller that a new edge was added
-            out.push((lhs, rhs));
 
-            for &lhs2 in self.upsets[lhs].iter() {
-                work.push((lhs2, rhs));
-            }
-            for &rhs2 in self.downsets[rhs].iter() {
-                work.push((lhs, rhs2));
+            // Attempt to insert the rhs into the downstream_set
+            if self.downstream_sets[lhs].insert(rhs) {
+                self.upstream_sets[rhs].insert(lhs);
+                // Inform the caller that a new edge was added
+                out.push((lhs, rhs));
+
+                for &lhs2 in self.upstream_sets[lhs].iter() {
+                    work.push((lhs2, rhs));
+                }
+                for &rhs2 in self.downstream_sets[rhs].iter() {
+                    work.push((lhs, rhs2));
+                }
             }
         }
 
         out
+    }
+
+    pub fn add_edge(mut self, lhs: ID, rhs: ID) -> (Self, Vec<(ID, ID)>) {
+        let mut work = vec![(lhs, rhs)];
+        let mut out = Vec::<(ID, ID)>::new();
+
+        while let Some((lhs, rhs)) = work.pop() {
+            let (lhs, rhs) = (usize::from(lhs), usize::from(rhs));
+
+            // Attempt to insert the rhs into the downstream_set
+            if self.downstream_sets[lhs].insert(rhs) {
+                self.upstream_sets[rhs].insert(lhs);
+                // Inform the caller that a new edge was added
+                out.push((lhs, rhs));
+
+                for &lhs2 in self.upstream_sets[lhs].iter() {
+                    work.push((lhs2, rhs));
+                }
+                for &rhs2 in self.downstream_sets[rhs].iter() {
+                    work.push((lhs, rhs2));
+                }
+            }
+        }
+
+        (self, out)
     }
 }
 
@@ -72,28 +105,22 @@ mod tests {
 
     #[test]
     fn edges_should_resolve_transitivity() {
-        let mut graph = (0..10).fold(Graph::default(), |mut acc, x| {
+        let graph = (0..10).fold(Graph::default(), |mut acc, _| {
             acc.add_node_mut();
             acc
         });
 
-        graph.add_edge_mut(0, 3, vec![]);
-        graph.add_edge_mut(1, 3, vec![]);
-        graph.add_edge_mut(2, 3, vec![]);
+        let mut new_edges: Vec<(usize, usize)> = [(0, 3), (1, 3), (2, 3), (3, 4)]
+            .iter()
+            .fold((graph, vec![]), |(g, _), (upstream, downstream)| {
+                g.add_edge(*upstream, *downstream)
+            })
+            .1;
 
-        let mut out = graph.add_edge_mut(3, 4, vec![]);
+        let mut expected: Vec<(usize, usize)> = [0, 1, 2, 3].iter().map(|&lhs| (lhs, 4)).collect();
 
-        let mut expected = Vec::new();
-        for &lhs in &[0, 1, 2, 3] {
-            for &rhs in &[4] {
-                expected.push((lhs, rhs));
-            }
-        }
-
-        out.sort_unstable();
+        new_edges.sort_unstable();
         expected.sort_unstable();
-        assert_eq!(out, expected);
-
-        println!("{:?}", &out);
+        assert_eq!(expected, new_edges);
     }
 }
