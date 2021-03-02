@@ -21,7 +21,7 @@ impl<T: Eq + std::hash::Hash + Clone> OrderedSet<T> {
 
 type ID = usize;
 #[derive(Debug, Default, Clone)]
-pub struct Reachability<ID>
+pub struct Graph<ID>
 where
     ID: Into<usize> + From<usize>,
 {
@@ -29,11 +29,11 @@ where
     downsets: Vec<OrderedSet<ID>>,
 }
 
-impl Reachability<ID>
+impl Graph<ID>
 where
     ID: Into<usize> + From<usize>,
 {
-    pub fn add_node(&mut self) -> ID {
+    pub fn add_node_mut(&mut self) -> ID {
         let i = ID::from(self.upsets.len());
 
         self.upsets.push(OrderedSet::default());
@@ -41,7 +41,7 @@ where
         i
     }
 
-    pub fn add_edge(&mut self, lhs: ID, rhs: ID, mut out: Vec<(ID, ID)>) -> Vec<(ID, ID)> {
+    pub fn add_edge_mut(&mut self, lhs: ID, rhs: ID, mut out: Vec<(ID, ID)>) -> Vec<(ID, ID)> {
         let mut work = vec![(lhs, rhs)];
 
         while let Some((lhs, rhs)) = work.pop() {
@@ -71,17 +71,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn edges_should_persist_transitivity() {
-        let mut r = Reachability::default();
-        for _ in 0..10 {
-            r.add_node();
-        }
+    fn edges_should_resolve_transitivity() {
+        let mut graph = (0..10).fold(Graph::default(), |mut acc, x| {
+            acc.add_node_mut();
+            acc
+        });
 
-        r.add_edge(0, 3, vec![]);
-        r.add_edge(1, 3, vec![]);
-        r.add_edge(2, 3, vec![]);
+        graph.add_edge_mut(0, 3, vec![]);
+        graph.add_edge_mut(1, 3, vec![]);
+        graph.add_edge_mut(2, 3, vec![]);
 
-        let mut out = r.add_edge(3, 4, vec![]);
+        let mut out = graph.add_edge_mut(3, 4, vec![]);
 
         let mut expected = Vec::new();
         for &lhs in &[0, 1, 2, 3] {
