@@ -34,22 +34,24 @@ where
     ID: Into<usize> + From<usize>,
 {
     pub fn add_node_mut(&mut self) -> ID {
-        let i = ID::from(self.upstream_sets.len());
-
         self.upstream_sets.push(OrderedSet::default());
         self.downstream_sets.push(OrderedSet::default());
-        i
+
+        ID::from(self.upstream_sets.len() - 1)
     }
 
+    #[allow(dead_code)]
     pub fn add_node(mut self) -> (ID, Self) {
-        let i = ID::from(self.upstream_sets.len());
-
-        self.upstream_sets.push(OrderedSet::default());
-        self.downstream_sets.push(OrderedSet::default());
-        (i, self)
+        let new_id = self.add_node_mut();
+        (new_id, self)
     }
 
-    pub fn add_edge_mut(&mut self, lhs: ID, rhs: ID, mut out: Vec<(ID, ID)>) -> Vec<(ID, ID)> {
+    pub fn add_edge_mut(
+        &mut self,
+        lhs: ID,
+        rhs: ID,
+        mut new_edges: Vec<(ID, ID)>,
+    ) -> Vec<(ID, ID)> {
         let mut work = vec![(lhs, rhs)];
 
         while let Some((lhs, rhs)) = work.pop() {
@@ -59,7 +61,7 @@ where
             if self.downstream_sets[lhs].insert(rhs) {
                 self.upstream_sets[rhs].insert(lhs);
                 // Inform the caller that a new edge was added
-                out.push((lhs, rhs));
+                new_edges.push((lhs, rhs));
 
                 for &lhs2 in self.upstream_sets[lhs].iter() {
                     work.push((lhs2, rhs));
@@ -70,32 +72,14 @@ where
             }
         }
 
-        out
+        new_edges
     }
 
+    #[allow(dead_code)]
     pub fn add_edge(mut self, lhs: ID, rhs: ID) -> (Self, Vec<(ID, ID)>) {
-        let mut work = vec![(lhs, rhs)];
-        let mut out = Vec::<(ID, ID)>::new();
+        let new_edges = self.add_edge_mut(lhs, rhs, Vec::new());
 
-        while let Some((lhs, rhs)) = work.pop() {
-            let (lhs, rhs) = (usize::from(lhs), usize::from(rhs));
-
-            // Attempt to insert the rhs into the downstream_set
-            if self.downstream_sets[lhs].insert(rhs) {
-                self.upstream_sets[rhs].insert(lhs);
-                // Inform the caller that a new edge was added
-                out.push((lhs, rhs));
-
-                for &lhs2 in self.upstream_sets[lhs].iter() {
-                    work.push((lhs2, rhs));
-                }
-                for &rhs2 in self.downstream_sets[rhs].iter() {
-                    work.push((lhs, rhs2));
-                }
-            }
-        }
-
-        (self, out)
+        (self, new_edges)
     }
 }
 
