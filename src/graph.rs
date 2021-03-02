@@ -1,31 +1,60 @@
-#[derive(Debug, Default, Clone)]
-struct OrderedSet<Idx> {
-    v: Vec<Idx>,
-    s: std::collections::HashSet<Idx>,
+use std::fmt::Debug;
+
+#[derive(Default, Clone)]
+/// OrderedSet maintains a consistent order of items determined by the sequence
+/// that elements were added to the set.
+struct OrderedSet<T> {
+    v: Vec<T>,
+    s: std::collections::HashSet<T>,
 }
 
-impl<Idx> OrderedSet<Idx>
+impl<T> OrderedSet<T>
 where
-    Idx: Eq + std::hash::Hash + Clone + Copy,
+    T: Eq + std::hash::Hash + Clone + Copy,
 {
-    fn insert(&mut self, value: Idx) -> Option<Idx> {
+    /// If an element doesn't currently exist in a set, it is appended to the
+    /// end of the set and true is returned.
+    fn insert(&mut self, value: T) -> bool {
         if self.s.insert(value.clone()) {
             self.v.push(value);
-            Some(value)
+            true
         } else {
-            None
+            false
         }
     }
+}
 
-    fn iter(&self) -> std::slice::Iter<Idx> {
+impl<T> OrderedSet<T>
+where
+    T: Clone + Copy,
+{
+    fn iter(&self) -> std::slice::Iter<T> {
         self.v.iter()
     }
 }
 
+impl<T> std::fmt::Debug for OrderedSet<T>
+where
+    T: std::fmt::Debug + Clone + Copy,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "OrderedSet{{{}}}",
+            self.clone()
+                .iter()
+                .map(|t| format!("{:?}", t))
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
+    }
+}
+
+/// Graph
 #[derive(Debug, Default, Clone)]
 pub struct Graph<Idx>
 where
-    Idx: Into<usize> + From<usize>,
+    Idx: Into<usize> + From<usize> + Debug + Copy,
 {
     upstream_sets: Vec<OrderedSet<Idx>>,
     downstream_sets: Vec<OrderedSet<Idx>>,
@@ -33,7 +62,7 @@ where
 
 impl<Idx> Graph<Idx>
 where
-    Idx: Clone + Copy + Eq + std::hash::Hash + Default + Into<usize> + From<usize>,
+    Idx: Clone + Copy + Eq + std::hash::Hash + Default + Into<usize> + From<usize> + Debug,
 {
     pub fn add_node_mut(&mut self) -> Idx {
         self.upstream_sets.push(OrderedSet::default());
@@ -58,7 +87,7 @@ where
 
         while let Some((lhs, rhs)) = work.pop() {
             // Attempt to insert the rhs into the downstream_set
-            if self.downstream_sets[lhs.into()].insert(rhs).is_some() {
+            if self.downstream_sets[lhs.into()].insert(rhs) {
                 self.upstream_sets[rhs.into()].insert(lhs);
                 // Inform the caller that a new edge was added
                 new_edges.push((lhs, rhs));

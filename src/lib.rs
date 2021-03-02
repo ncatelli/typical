@@ -146,8 +146,6 @@ mod tests {
         let vid = t.new_val(AbstractTypeValue::VBool);
         let uid = t.new_use(AbstractTypeUse::UBool);
         assert!(t.flow(vid, uid).is_ok());
-
-        println!("{:?}", &t);
     }
 
     #[test]
